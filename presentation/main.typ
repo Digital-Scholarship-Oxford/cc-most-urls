@@ -4,12 +4,12 @@
   title: "How long are most urls?",
   subtitle: "An exercise in using the Common Crawl dataset",
   date: datetime.today().display("[year]-[month]-[day]"),
-  authors: ("Pierre Marshall"),
-  ratio: 16/9,
+  authors: "Pierre Marshall",
+  ratio: 16 / 9,
   layout: "small",
   title-color: rgb("#002147"),
   footer: false,
-  toc: false
+  toc: false,
 )
 
 = Introduction
@@ -92,31 +92,27 @@ Stacked bar chart of i18n count broken down by status code.
 == Average tables
 
 #show figure.where(
-  kind: table
+  kind: table,
 ): set figure.caption(position: top)
 
 #figure(
-table(
-  columns: 7,
-  table.header(
-    [averages], [100], [200], [300], [400], [500], [total],
+  table(
+    columns: 7,
+    table.header([averages], [100], [200], [300], [400], [500], [total]),
+    [mean], [104], [5], [104], [5], [104], [104],
+    [median], [108], [4], [104], [5], [104], [5],
   ),
-  [mean], [104], [5], [104], [5], [104], [104],
-  [median], [108], [4], [104], [5], [104], [5],
-),
   caption: [Normal average],
 ) <norm_avg_table>
 
 
 #figure(
   table(
-  columns: 7,
-  table.header(
-    [averages], [100], [200], [300], [400], [500], [total],
+    columns: 7,
+    table.header([averages], [100], [200], [300], [400], [500], [total]),
+    [mean], [104], [5], [104], [5], [104], [104],
+    [median], [108], [4], [104], [5], [104], [5],
   ),
-  [mean], [104], [5], [104], [5], [104], [104],
-  [median], [108], [4], [104], [5], [104], [5],
-),
   caption: [Internationalised average],
 ) <i18n_avg_table>
 

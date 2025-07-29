@@ -1,9 +1,15 @@
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+// use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 use flate2;
 use flate2::read::GzDecoder;
+
+          use async_compression::futures::bufread::GzipDecoder;
+                // use futures::{
+                //     io::{self, BufReader, ErrorKind},
+                //     prelude::*,
+                // };
 
 #[tokio::main]
 async fn main() {
@@ -25,14 +31,25 @@ async fn main() {
                 println!("downloading {full_download_path}");
 
                 // download the file, this returns compressed nonsense
-                let body = client
-                    .get(full_download_path)
-                    .send()
-                    .unwrap()
-                    .bytes()
-                    .unwrap();
+                // let body = client
+                //     .get(full_download_path)
+                //     .send()
+                //     .unwrap()
+                //     .bytes()
+                //     .unwrap();
 
-                let mut decoder = GzDecoder::new(BufReader::new(body));
+      
+                let response = reqwest::get("http://localhost:8000/test.txt.gz").await.unwrap();
+                let reader = response
+                    .bytes_stream()
+                    .map_err(|e| println!("{e}"))
+                    .into_async_read();
+                let mut decoder = GzipDecoder::new(futures::io::BufReader::new(reader));
+                let mut data = String::new();
+                decoder.read_to_string(&mut data).await.unwrap();
+                println!("{data:?}");
+
+                // let mut decoder = GzDecoder::new(BufReader::new(body));
 
                 // now, decode the bytes in the response
                 // let reader = GzDecoder::new(body);

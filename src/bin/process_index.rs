@@ -1,6 +1,7 @@
 use idna::uts46::{self, Uts46};
 use nanoserde::DeJson;
-use std::fs::{self, File};
+use polars::prelude::*;
+use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
 use url::Url;
@@ -41,10 +42,26 @@ fn main() {
         status: String,
     }
 
+    struct IndexRecordParsed {
+        url_column: Vec<String>,
+        url_length_column: Vec<u16>,
+        i18_url_length_column: Vec<u16>,
+        status_column: Vec<u8>,
+    }
+
+    let mut index_record_parsed = IndexRecordParsed {
+        url_column: Vec::with_capacity(256000000),       // 246MB
+        url_length_column: Vec::with_capacity(64000000), // 64MB
+        i18_url_length_column: Vec::with_capacity(64000000), // 64MB
+        status_column: Vec::with_capacity(12000000),     // 64MB
+    };
+
+    // loop up here on the index
+
     if let Ok(lines) = read_lines("urls.txt") {
         // Consumes the iterator, returns an (Optional) String
 
-        let mut url_list = Vec::new();
+        // let mut url_list = Vec::new();
 
         let mut invalid_urls: usize = 0;
 
@@ -65,37 +82,69 @@ fn main() {
                 }
             };
 
-            let url_length: usize = index.url.len();
+            let url_length: u16 = index.url.len() as u16;
 
-            let i18_url_length: usize = internationalised_domain_length(&parsed_url);
+            let i18_url_length: u16 = internationalised_domain_length(&parsed_url) as u16;
 
-            let status: char = index.status.chars().next().unwrap();
+            let status: u8 = index.status.chars().next().unwrap().to_digit(10).unwrap() as u8;
 
-            let record = (index.url, url_length, i18_url_length, status);
-            // push to url list a tuple of strings
-            // including the digest
-            url_list.push(record);
+            // push these values to lists
+            index_record_parsed.url_column.push(index.url);
+            index_record_parsed.url_length_column.push(url_length);
+            index_record_parsed
+                .i18_url_length_column
+                .push(i18_url_length);
+            index_record_parsed.status_column.push(status);
         }
-
-        // filter the list and deduplicate by key
-        // should be 225 when testing with test dataset
-        let duplicated_list_size = url_list.len();
-        // deduplicate by url
-        url_list.dedup_by(|a, b| a.0 == b.0);
-        let unduplicated_list_size = url_list.len();
-
-        println!(
-            "invalid {invalid_urls}\nduplicated {duplicated_list_size}\nunduplicated {unduplicated_list_size}"
-        );
-
-        let stringified_list: String = url_list
-            .iter()
-            .map(|f| format!("{},{},{}", f.1, f.2, f.3))
-            .collect::<Vec<String>>()
-            .join("\n");
-
-        fs::write("values.csv", stringified_list).unwrap();
     }
+
+    // build the lazyframe
+    let initial_lazyframe = DataFrame::new(vec![
+        Column::new("url".into(), &index_record_parsed.url_column),
+        Column::new(
+            "raw_characters".into(),
+            &index_record_parsed.url_length_column,
+        ),
+        Column::new(
+            "i18n_characters".into(),
+            &index_record_parsed.i18_url_length_column,
+        ),
+        Column::new("status_code".into(), &index_record_parsed.status_column),
+    ])
+    .unwrap()
+    .lazy()
+    .unique(Some(vec!["url".into()]), UniqueKeepStrategy::Any);
+
+    let grouped_frame = initial_lazyframe
+        .group_by(["raw_characters"])
+        .agg([
+            col("raw_characters")
+                .filter(col("status_code").eq(lit(1u8)))
+                .count()
+                .alias("informational"),
+            col("raw_characters")
+                .filter(col("status_code").eq(lit(2u8)))
+                .count()
+                .alias("successful"),
+            col("raw_characters")
+                .filter(col("status_code").eq(lit(3u8)))
+                .count()
+                .alias("redirection"),
+            col("raw_characters")
+                .filter(col("status_code").eq(lit(4u8)))
+                .count()
+                .alias("client_error"),
+            col("raw_characters")
+                .filter(col("status_code").eq(lit(5u8)))
+                .count()
+                .alias("server_error"),
+            col("raw_characters").count().alias("total"),
+        ])
+        .sort(["raw_characters"], Default::default())
+        .collect()
+        .unwrap();
+
+    println!("{grouped_frame}");
 }
 
 // The output is wrapped in a Result to allow matching on errors.

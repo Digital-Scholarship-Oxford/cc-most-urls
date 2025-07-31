@@ -5,11 +5,11 @@ use std::path::Path;
 use flate2;
 use flate2::read::GzDecoder;
 
-          use async_compression::futures::bufread::GzipDecoder;
-                // use futures::{
-                //     io::{self, BufReader, ErrorKind},
-                //     prelude::*,
-                // };
+use async_compression::futures::bufread::GzipDecoder;
+// use futures::{
+//     io::{self, BufReader, ErrorKind},
+//     prelude::*,
+// };
 
 #[tokio::main]
 async fn main() {
@@ -38,8 +38,9 @@ async fn main() {
                 //     .bytes()
                 //     .unwrap();
 
-      
-                let response = reqwest::get("http://localhost:8000/test.txt.gz").await.unwrap();
+                let response = reqwest::get("http://localhost:8000/test.txt.gz")
+                    .await
+                    .unwrap();
                 let reader = response
                     .bytes_stream()
                     .map_err(|e| println!("{e}"))

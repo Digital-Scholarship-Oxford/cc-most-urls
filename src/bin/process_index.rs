@@ -48,20 +48,24 @@ fn main() {
         i18_url_length_column: Vec<u16>,
         status_column: Vec<u8>,
     }
+    impl IndexRecordParsed {
+        fn new() -> Self {
+            IndexRecordParsed {
+                // these are all columns of data
+                url_column: Vec::with_capacity(256_000_000), // 246MB
+                url_length_column: Vec::with_capacity(64_000_000), // 64MB
+                i18_url_length_column: Vec::with_capacity(64_000_000), // 64MB
+                status_column: Vec::with_capacity(12_000_000), // 12MB
+            }
+        }
+    }
 
-    let mut index_record_parsed = IndexRecordParsed {
-        url_column: Vec::with_capacity(256000000),       // 246MB
-        url_length_column: Vec::with_capacity(64000000), // 64MB
-        i18_url_length_column: Vec::with_capacity(64000000), // 64MB
-        status_column: Vec::with_capacity(12000000),     // 64MB
-    };
+    let mut index_record_parsed = IndexRecordParsed::new();
 
     // loop up here on the index
 
     if let Ok(lines) = read_lines("urls.txt") {
         // Consumes the iterator, returns an (Optional) String
-
-        // let mut url_list = Vec::new();
 
         let mut invalid_urls: usize = 0;
 
@@ -74,77 +78,56 @@ fn main() {
             // Deserialise json
             let index: CDXIndex = DeJson::deserialize_json(index_json_line).unwrap();
 
-            let parsed_url = match Url::parse(&index.url) {
-                Ok(parsed_url) => parsed_url,
-                Err(_) => {
-                    invalid_urls = invalid_urls.wrapping_add(1);
-                    continue;
-                }
-            };
+            if let Ok(parsed_url) = Url::parse(&index.url) {
+                // check url lengths
+                let url_length: u16 = index.url.len() as u16;
+                let i18_url_length: u16 = internationalised_domain_length(&parsed_url) as u16;
+                // find status from index
+                let status: u8 = index.status.chars().next().unwrap().to_digit(10).unwrap() as u8;
 
-            let url_length: u16 = index.url.len() as u16;
-
-            let i18_url_length: u16 = internationalised_domain_length(&parsed_url) as u16;
-
-            let status: u8 = index.status.chars().next().unwrap().to_digit(10).unwrap() as u8;
-
-            // push these values to lists
-            index_record_parsed.url_column.push(index.url);
-            index_record_parsed.url_length_column.push(url_length);
-            index_record_parsed
-                .i18_url_length_column
-                .push(i18_url_length);
-            index_record_parsed.status_column.push(status);
+                // push these values to lists
+                index_record_parsed.url_column.push(index.url);
+                index_record_parsed.url_length_column.push(url_length);
+                index_record_parsed
+                    .i18_url_length_column
+                    .push(i18_url_length);
+                index_record_parsed.status_column.push(status);
+            } else {
+                // if the url is invalid, skip processing and
+                // increment the invalid_urls list
+                invalid_urls = invalid_urls.wrapping_add(1);
+            }
         }
     }
 
-    // build the lazyframe
-    let initial_lazyframe = DataFrame::new(vec![
-        Column::new("url".into(), &index_record_parsed.url_column),
-        Column::new(
-            "raw_characters".into(),
-            &index_record_parsed.url_length_column,
-        ),
-        Column::new(
-            "i18n_characters".into(),
-            &index_record_parsed.i18_url_length_column,
-        ),
-        Column::new("status_code".into(), &index_record_parsed.status_column),
-    ])
-    .unwrap()
-    .lazy()
-    .unique(Some(vec!["url".into()]), UniqueKeepStrategy::Any);
+    process_records(&index_record_parsed);
 
-    let grouped_frame = initial_lazyframe
-        .group_by(["raw_characters"])
-        .agg([
-            col("raw_characters")
-                .filter(col("status_code").eq(lit(1u8)))
-                .count()
-                .alias("informational"),
-            col("raw_characters")
-                .filter(col("status_code").eq(lit(2u8)))
-                .count()
-                .alias("successful"),
-            col("raw_characters")
-                .filter(col("status_code").eq(lit(3u8)))
-                .count()
-                .alias("redirection"),
-            col("raw_characters")
-                .filter(col("status_code").eq(lit(4u8)))
-                .count()
-                .alias("client_error"),
-            col("raw_characters")
-                .filter(col("status_code").eq(lit(5u8)))
-                .count()
-                .alias("server_error"),
-            col("raw_characters").count().alias("total"),
+    fn process_records(index_record_parsed: &IndexRecordParsed) {
+        // build the lazyframe
+        let initial_lazyframe = DataFrame::new(vec![
+            Column::new("url".into(), &index_record_parsed.url_column),
+            Column::new(
+                "raw_characters".into(),
+                &index_record_parsed.url_length_column,
+            ),
+            Column::new(
+                "i18n_characters".into(),
+                &index_record_parsed.i18_url_length_column,
+            ),
+            Column::new("status_code".into(), &index_record_parsed.status_column),
         ])
-        .sort(["raw_characters"], Default::default())
-        .collect()
-        .unwrap();
+        .unwrap()
+        .lazy()
+        .unique(Some(vec!["url".into()]), UniqueKeepStrategy::Any);
 
-    println!("{grouped_frame}");
+        let raw_chars_grouped =
+            group_lazyframe(initial_lazyframe.clone(), "raw_characters").unwrap();
+        let i18n_chars_grouped =
+            group_lazyframe(initial_lazyframe.clone(), "i18n_characters").unwrap();
+
+        println!("{raw_chars_grouped}");
+        println!("{i18n_chars_grouped}");
+    }
 }
 
 // The output is wrapped in a Result to allow matching on errors.
@@ -155,4 +138,37 @@ where
 {
     let file = File::open(filename)?;
     Ok(io::BufReader::new(file).lines())
+}
+
+fn group_lazyframe(
+    lazyframe: LazyFrame,
+    column: &str,
+) -> Result<polars::prelude::DataFrame, PolarsError> {
+    lazyframe
+        .group_by([column])
+        .agg([
+            col(column)
+                .filter(col(column).eq(lit(1u8)))
+                .count()
+                .alias("informational"),
+            col(column)
+                .filter(col("status_code").eq(lit(2u8)))
+                .count()
+                .alias("successful"),
+            col(column)
+                .filter(col("status_code").eq(lit(3u8)))
+                .count()
+                .alias("redirection"),
+            col(column)
+                .filter(col("status_code").eq(lit(4u8)))
+                .count()
+                .alias("client_error"),
+            col(column)
+                .filter(col("status_code").eq(lit(5u8)))
+                .count()
+                .alias("server_error"),
+            col(column).count().alias("total"),
+        ])
+        .sort([column], SortMultipleOptions::default())
+        .collect()
 }

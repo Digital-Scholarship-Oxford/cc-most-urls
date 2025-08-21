@@ -6,6 +6,8 @@ use std::io::{self, BufRead};
 use std::path::Path;
 use url::Url;
 
+use flate2::read::MultiGzDecoder;
+
 #[derive(DeJson, Debug)]
 struct CDXIndex {
     url: String,
@@ -34,45 +36,83 @@ fn main() {
     let mut index_record_parsed = IndexRecordParsed::new();
     let mut invalid_urls: usize = 0;
 
-    // loop up here on the index
+    if let Ok(lines) = read_lines("cc-index.paths") {
+        let line_iterator = lines.map_while(Result::ok);
 
-    if let Ok(lines) = read_lines("urls.txt") {
-        // Consumes the iterator, returns an (Optional) String
+        const APP_USER_AGENT: &str =
+            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
-        let line_iterator = lines.map_while(Result::ok).enumerate();
+        let client = reqwest::blocking::Client::builder()
+            .user_agent(APP_USER_AGENT)
+            .build()
+            .unwrap();
 
-        for line in line_iterator {
-            // extract the json object from the cdx(j) line
-            let index_json_line: &str = line.1.splitn(3, ' ').nth(2).unwrap();
+        for download_path in line_iterator {
+            if download_path.ends_with("gz") {
+                let full_download_path = format!("https://data.commoncrawl.org/{download_path}");
 
-            // Deserialise json
-            let index: CDXIndex = DeJson::deserialize_json(index_json_line).unwrap();
+                println!("downloading {full_download_path}");
 
-            if let Ok(parsed_url) = Url::parse(&index.url) {
-                // check url lengths
-                let url_length: u16 = index.url.len() as u16;
-                let i18_url_length: u16 = internationalised_domain_length(&parsed_url) as u16;
-                // find status from index
-                let status: u8 = index.status.chars().next().unwrap().to_digit(10).unwrap() as u8;
+                let response = client.get(full_download_path).send().unwrap();
 
-                // push these values to lists
-                index_record_parsed.url_column.push(index.url);
-                index_record_parsed.url_length_column.push(url_length);
-                index_record_parsed
-                    .i18_url_length_column
-                    .push(i18_url_length);
-                index_record_parsed.status_column.push(status);
-            } else {
-                // if the url is invalid, skip processing and
-                // increment the invalid_urls list
-                invalid_urls = invalid_urls.wrapping_add(1);
+                if response.status().is_success() {
+                    let compressed_bytes = response.bytes().unwrap();
+
+                    let mut decoder = MultiGzDecoder::new(&compressed_bytes[..]);
+                    // create string with around 5GB capacity
+                    let mut uncompressed_bytes = Vec::with_capacity(5000000000);
+
+                    std::io::copy(&mut decoder, &mut uncompressed_bytes).unwrap();
+
+                    let uncompressed_string =
+                        String::from_utf8(uncompressed_bytes).expect("Found invalid UTF-8");
+
+                    println!(
+                        "downloaded and decompressed {} bytes",
+                        uncompressed_string.len()
+                    );
+
+                    for line in uncompressed_string.lines().enumerate() {
+                        // extract the json object from the cdx(j) line
+                        let index_json_line: &str = line.1.splitn(3, ' ').nth(2).unwrap();
+
+                        // Deserialise json
+                        let index: CDXIndex = DeJson::deserialize_json(index_json_line).unwrap();
+
+                        if let Ok(parsed_url) = Url::parse(&index.url) {
+                            // check url lengths
+                            let url_length: u16 = index.url.len() as u16;
+                            let i18_url_length: u16 =
+                                internationalised_domain_length(&parsed_url) as u16;
+                            // find status from index
+                            let status: u8 =
+                                index.status.chars().next().unwrap().to_digit(10).unwrap() as u8;
+
+                            index_record_parsed.url_column.push(index.url);
+                            index_record_parsed.url_length_column.push(url_length);
+                            index_record_parsed
+                                .i18_url_length_column
+                                .push(i18_url_length);
+                            index_record_parsed.status_column.push(status);
+                        } else {
+                            // warning, mutex unlocking shenanigans here!
+                            // if the url is invalid, skip processing and
+                            // increment the invalid_urls list
+                            invalid_urls = invalid_urls.wrapping_add(1);
+                        }
+                    }
+
+
+
+
+                }
             }
         }
+
+        process_records(&index_record_parsed);
+
+        println!("{invalid_urls} urls were invalid");
     }
-
-    process_records(&index_record_parsed);
-
-    println!("{invalid_urls} urls were invalid");
 }
 
 fn internationalised_domain_length(parsed_url: &Url) -> usize {
@@ -164,9 +204,30 @@ fn process_records(index_record_parsed: &IndexRecordParsed) {
             .sort([column], SortMultipleOptions::default())
             .collect()
     }
-    let raw_chars_grouped = group_lazyframe(initial_lazyframe.clone(), "raw_characters").unwrap();
-    let i18n_chars_grouped = group_lazyframe(initial_lazyframe.clone(), "i18n_characters").unwrap();
 
-    println!("{raw_chars_grouped}");
-    println!("{i18n_chars_grouped}");
+    let mut raw_chars_grouped =
+        group_lazyframe(initial_lazyframe.clone(), "raw_characters").unwrap();
+    let mut raw_chars_grouped_csv =
+        File::create("raw_chars_grouped.csv").expect("could not create file");
+
+    println!("Raw characters table {raw_chars_grouped}");
+
+    CsvWriter::new(&mut raw_chars_grouped_csv)
+        .include_header(true)
+        .with_separator(b',')
+        .finish(&mut raw_chars_grouped)
+        .unwrap();
+
+    let mut i18n_chars_grouped =
+        group_lazyframe(initial_lazyframe.clone(), "i18n_characters").unwrap();
+    let mut i18n_chars_grouped_csv =
+        File::create("i18n_chars_grouped.csv").expect("could not create file");
+
+    println!("Internationalised characters table {i18n_chars_grouped}");
+
+    CsvWriter::new(&mut i18n_chars_grouped_csv)
+        .include_header(true)
+        .with_separator(b',')
+        .finish(&mut i18n_chars_grouped)
+        .unwrap();
 }

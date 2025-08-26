@@ -1186,6 +1186,7 @@ dependencies = [
  "polars",
  "rayon",
  "reqwest",
+ "unicode-segmentation",
  "url",
 ]
 

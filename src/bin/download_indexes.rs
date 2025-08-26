@@ -1,6 +1,6 @@
+use flate2::read::MultiGzDecoder;
 use std::fs::File;
 use std::path::Path;
-use flate2::read::MultiGzDecoder;
 
 fn main() {
     if let Ok(lines) = read_lines("cc-index.paths") {
@@ -30,10 +30,7 @@ fn main() {
 
                     let lines = String::from_utf8(uncompressed_bytes).expect("Found invalid UTF-8");
 
-                    println!(
-                        "downloaded and decompressed {} bytes",
-                        lines.len()
-                    );
+                    println!("downloaded and decompressed {} bytes", lines.len());
                 }
             }
         }

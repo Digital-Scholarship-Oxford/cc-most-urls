@@ -4,6 +4,7 @@ use polars::prelude::*;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
+use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
 use flate2::read::MultiGzDecoder;
@@ -101,10 +102,6 @@ fn main() {
                             invalid_urls = invalid_urls.wrapping_add(1);
                         }
                     }
-
-
-
-
                 }
             }
         }
@@ -128,20 +125,20 @@ fn internationalised_domain_length(parsed_url: &Url) -> usize {
             )
             .0;
 
-            raw_url_domain.chars().count() - i18n_domain.chars().count()
+            raw_url_domain.graphemes(true).count() - i18n_domain.graphemes(true).count()
         }
         None => 0,
     };
 
-    let decoded_length_difference: usize = url.chars().count()
+    let decoded_length_difference: usize = url.graphemes(true).count()
         - percent_encoding::percent_decode_str(url)
             .decode_utf8_lossy()
-            .chars()
+            .graphemes(true)
             .count();
 
     let total_difference: usize = i18n_domain_length_difference + decoded_length_difference;
 
-    url.chars().count() - total_difference
+    url.graphemes(true).count() - total_difference
 }
 
 // The output is wrapped in a Result to allow matching on errors.

@@ -37,8 +37,6 @@ fn main() {
     if let Ok(lines) = read_lines("cc-index.paths") {
         let line_iterator = lines.map_while(Result::ok);
 
-        let mut parsed_index_record_list: Vec<IndexRecordParsed> = Vec::with_capacity(256_000_000);
-
         const APP_USER_AGENT: &str =
             concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
@@ -49,6 +47,8 @@ fn main() {
             .unwrap();
 
         for download_path in line_iterator {
+            let mut parsed_index_record_list: Vec<IndexRecordParsed> =
+                Vec::with_capacity(256_000_000);
             if download_path.ends_with("gz") {
                 let full_download_path = format!("https://data.commoncrawl.org/{download_path}");
 
@@ -61,7 +61,7 @@ fn main() {
 
                     let mut decoder = MultiGzDecoder::new(&compressed_bytes[..]);
                     // create string with around 5GB capacity
-                    let mut uncompressed_bytes = Vec::with_capacity(5000000000);
+                    let mut uncompressed_bytes = Vec::with_capacity(500_0000_000);
 
                     std::io::copy(&mut decoder, &mut uncompressed_bytes).unwrap();
 
@@ -109,14 +109,15 @@ fn main() {
             println!("deduplicating urls");
             parsed_index_record_list.dedup_by(|a, b| a.url == b.url);
 
-            println!("writing to file");
             let string_list: String = parsed_index_record_list
                 .iter()
                 .map(|x| format!("{},{},{}", x.url_length, x.i18_url_length, x.status))
                 .collect::<Vec<String>>()
                 .join("\n");
+            
+            println!("writing to file");
 
-            // at this point, append index_records_parsed to a file
+            // at this point, append index_records_parsed to a file, the code will break here if the file is not already there!
             let mut big_csv = OpenOptions::new().append(true).open("values.csv").unwrap();
             let string_list_bytes = string_list.into_bytes();
             big_csv.write_all(&string_list_bytes).unwrap();

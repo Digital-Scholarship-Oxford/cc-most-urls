@@ -1,6 +1,7 @@
 use idna::uts46::{self, Uts46};
 use nanoserde::DeJson;
-use std::fs::{File, OpenOptions};
+use std::fmt::format;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 use unicode_segmentation::UnicodeSegmentation;
@@ -47,8 +48,6 @@ fn main() {
             .unwrap();
 
         for download_path in line_iterator {
-            let mut parsed_index_record_list: Vec<IndexRecordParsed> =
-                Vec::with_capacity(256_000_000);
             if download_path.ends_with("gz") {
                 let full_download_path = format!("https://data.commoncrawl.org/{download_path}");
 
@@ -61,7 +60,7 @@ fn main() {
 
                     let mut decoder = MultiGzDecoder::new(&compressed_bytes[..]);
                     // create string with around 5GB capacity
-                    let mut uncompressed_bytes = Vec::with_capacity(500_0000_000);
+                    let mut uncompressed_bytes = Vec::with_capacity(5_000_000_000);
 
                     std::io::copy(&mut decoder, &mut uncompressed_bytes).unwrap();
 
@@ -72,6 +71,9 @@ fn main() {
                         "downloaded and decompressed {} bytes",
                         uncompressed_string.len()
                     );
+
+                    let mut parsed_index_record_list: Vec<IndexRecordParsed> =
+                        Vec::with_capacity(256_000);
 
                     for line in uncompressed_string.lines().enumerate() {
                         // extract the json object from the cdx(j) line
@@ -103,26 +105,29 @@ fn main() {
                             invalid_urls = invalid_urls.wrapping_add(1);
                         }
                     }
+
+                    let number_of_urls = parsed_index_record_list.len();
+                    println!("processed {number_of_urls} urls, now deduplicating");
+                    parsed_index_record_list.dedup_by(|a, b| a.url == b.url);
+                    let duplicated_urls = number_of_urls - parsed_index_record_list.len();
+                    println!("removed {duplicated_urls} duplicates");
+
+                    {
+                        let string_list: String = parsed_index_record_list
+                            .iter()
+                            .map(|x| format!("{},{},{}", x.url_length, x.i18_url_length, x.status))
+                            .collect::<Vec<String>>()
+                            .join("\n");
+
+                        // at this point, append index_records_parsed to a file,
+                        // the code will break here if the file is not already there!
+                        let file_path = download_path[49..54].to_owned() + ".csv";
+                        println!("writing to {file_path}");
+                        fs::write(file_path, string_list).unwrap();
+                    }
+                    println!("done!\nmoving to the next file");
                 }
             }
-
-            println!("deduplicating urls");
-            parsed_index_record_list.dedup_by(|a, b| a.url == b.url);
-
-            let string_list: String = parsed_index_record_list
-                .iter()
-                .map(|x| format!("{},{},{}", x.url_length, x.i18_url_length, x.status))
-                .collect::<Vec<String>>()
-                .join("\n");
-            
-            println!("writing to file");
-
-            // at this point, append index_records_parsed to a file, the code will break here if the file is not already there!
-            let mut big_csv = OpenOptions::new().append(true).open("values.csv").unwrap();
-            let string_list_bytes = string_list.into_bytes();
-            big_csv.write_all(&string_list_bytes).unwrap();
-
-            println!("done!\nmoving to the next file");
         }
 
         // process_records(&index_record_parsed);

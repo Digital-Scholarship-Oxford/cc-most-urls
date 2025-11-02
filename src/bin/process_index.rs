@@ -1,8 +1,7 @@
 use idna::uts46::{self, Uts46};
 use nanoserde::DeJson;
-use std::fmt::format;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::fs::{self, File};
+use std::io::{self, BufRead};
 use std::path::Path;
 use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
@@ -129,8 +128,6 @@ fn main() {
                 }
             }
         }
-
-        // process_records(&index_record_parsed);
 
         println!("{invalid_urls} urls were invalid");
     }
